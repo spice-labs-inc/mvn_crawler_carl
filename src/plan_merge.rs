@@ -3,8 +3,8 @@ use std::{
     fs::{File, create_dir_all},
     io::{Read, Write},
     path::PathBuf,
-    thread,
-    time::Instant,
+    thread::{self, sleep},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Result, bail};
@@ -69,7 +69,21 @@ pub fn version_from_metadata(metadata: &Vec<u8>) -> Result<(String, String, Vec<
     }
 }
 pub fn suffixes() -> Vec<&'static str> {
-    vec![".jar", "-javadoc.jar", "-sources.jar", ".pom"]
+    vec![
+        ".jar",
+        ".war",
+        ".ear",
+        "-javadoc.jar",
+        "-sources.jar",
+        ".pom",
+    ]
+}
+
+/// a command sent from the planner to the targets
+#[derive(Debug, Clone)]
+pub enum MergeCmd {
+    End,
+    Merge(MergeGroup),
 }
 
 #[derive(Debug, Clone)]
@@ -87,71 +101,75 @@ pub struct MergeEntry {
     pub state: State,
 }
 
-fn read_stream_and_do_merge(rx: Receiver<MergeGroup>, _state: State) -> Result<()> {
+fn read_stream_and_do_merge(rx: Receiver<MergeCmd>, _state: State) -> Result<()> {
     let mut client = build_client();
 
     let mut loop_cnt = 0;
 
-    for merge_grp in rx {
-        let mut files = vec![];
+    for merge_cmd in rx {
         let start = Instant::now();
-        for to_process in &merge_grp.entries {
-            match to_process {
-                MergeEntry {
-                    source_url: Some(source_url),
-                    source_file: None,
-                    dest_file,
-                    state,
-                } => {
-                    let url = format!("{}/{}", state.repo_url()?, source_url);
-                    match get_subbed_url(&url, &mut client, state.clone()) {
-                        Ok(loaded) => {
+        match &merge_cmd {
+            MergeCmd::End => return Ok(()),
+            MergeCmd::Merge(merge_grp) => {
+                for to_process in &merge_grp.entries {
+                    match to_process {
+                        MergeEntry {
+                            source_url: Some(source_url),
+                            source_file: None,
+                            dest_file,
+                            state,
+                        } => {
+                            let url = format!("{}/{}", state.repo_url()?, source_url);
+                            match get_subbed_url(&url, &mut client, state.clone()) {
+                                Ok(loaded) => {
+                                    create_dir_all(match dest_file.parent() {
+                                        Some(f) => f,
+                                        None => bail!(
+                                            "Couldn't get parent directory for {:?}",
+                                            dest_file
+                                        ),
+                                    })?;
+                                    let mut out_file = File::create(&dest_file)?;
+                                    out_file.write_all(&loaded.data())?;
+                                }
+                                Err(_) => {
+                                    // log ?? dunno
+                                }
+                            }
+                        }
+                        MergeEntry {
+                            source_url: None,
+                            source_file: Some(source_file),
+                            dest_file,
+                            state: _,
+                        } => {
+                            let mut bytes = vec![];
+                            let mut in_file = File::open(&source_file)?;
+                            in_file.read_to_end(&mut bytes)?;
                             create_dir_all(match dest_file.parent() {
                                 Some(f) => f,
                                 None => bail!("Couldn't get parent directory for {:?}", dest_file),
                             })?;
                             let mut out_file = File::create(&dest_file)?;
-                            out_file.write_all(&loaded.data())?;
+                            out_file.write_all(&bytes)?;
                         }
-                        Err(_) => {
-                            // log ?? dunno
+                        me => {
+                            bail!("Got weird merge entry {:?}", me);
                         }
                     }
-                    files.push(dest_file);
                 }
-                MergeEntry {
-                    source_url: None,
-                    source_file: Some(source_file),
-                    dest_file,
-                    state: _,
-                } => {
-                    let mut bytes = vec![];
-                    let mut in_file = File::open(&source_file)?;
-                    in_file.read_to_end(&mut bytes)?;
-                    create_dir_all(match dest_file.parent() {
-                        Some(f) => f,
-                        None => bail!("Couldn't get parent directory for {:?}", dest_file),
-                    })?;
-                    let mut out_file = File::create(&dest_file)?;
-                    out_file.write_all(&bytes)?;
 
-                    files.push(dest_file);
-                }
-                me => {
-                    bail!("Got weird merge entry {:?}", me);
+                loop_cnt += 1;
+                if loop_cnt % 50000 == 0 || merge_grp.entries.len() > 2000 {
+                    info!(
+                        "Done {}/{} cnt {}, took {:?}",
+                        merge_grp.group_id,
+                        merge_grp.artifact_id,
+                        merge_grp.entries.len(),
+                        Instant::now().duration_since(start)
+                    );
                 }
             }
-        }
-
-        loop_cnt += 1;
-        if loop_cnt % 500 == 0 || merge_grp.entries.len() > 500 {
-            info!(
-                "Done {}/{} cnt {}, took {:?}",
-                merge_grp.group_id,
-                merge_grp.artifact_id,
-                merge_grp.entries.len(),
-                Instant::now().duration_since(start)
-            );
         }
     }
     Ok(())
@@ -180,12 +198,19 @@ pub fn do_merge(state: State) -> Result<()> {
 }
 
 pub fn plan_merge_to_console(state: State) -> Result<()> {
-    let (tx, rx) = flume::bounded::<MergeGroup>(100);
+    let (tx, rx) = flume::bounded::<MergeCmd>(100);
     let _state_clone = state.clone();
     thread::spawn(move || {
         for x in rx {
-            for y in x.entries {
-                println!("{:?}", y);
+            match x {
+                MergeCmd::End => {
+                    return;
+                }
+                MergeCmd::Merge(merge_group) => {
+                    for y in merge_group.entries {
+                        println!("{:?}", y);
+                    }
+                }
             }
         }
     });
@@ -193,7 +218,7 @@ pub fn plan_merge_to_console(state: State) -> Result<()> {
     plan_merge(tx, state)
 }
 
-pub fn plan_merge(dest: Sender<MergeGroup>, state: State) -> Result<()> {
+pub fn plan_merge(dest: Sender<MergeCmd>, state: State) -> Result<()> {
     let crawl_db = state.latest_crawl()?;
     let start = Instant::now();
     let artifact_db = state.artifact_db()?;
@@ -288,11 +313,22 @@ pub fn plan_merge(dest: Sender<MergeGroup>, state: State) -> Result<()> {
             state: state.clone(),
         });
 
-        dest.send(MergeGroup {
+        dest.send(MergeCmd::Merge(MergeGroup {
             entries: to_send,
             group_id,
             artifact_id,
-        })?;
+        }))?;
+    }
+
+    // tell all the threads to end
+    for _ in 0..state.thread_cnt() + 5 {
+        dest.send(MergeCmd::End)?;
+    }
+
+    // wait for the threads to end before returning and
+    // closing the last TX
+    while state.thread_cnt() > 0 {
+        sleep(Duration::from_millis(100));
     }
 
     Ok(())

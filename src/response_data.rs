@@ -12,6 +12,7 @@ use crate::run_state::State;
 
 pub struct ResponseData {
     url: String,
+    file_path: String,
     data: Vec<u8>,
     mime_type: String,
     state: State,
@@ -20,6 +21,7 @@ pub struct ResponseData {
 impl ResponseData {
     pub fn new(
         url: String,
+        server_prefix: &str,
         data: Vec<u8>,
         mime_type: String,
         state: State,
@@ -27,6 +29,7 @@ impl ResponseData {
         state.repo_url()?;
         state.add_to_total_bytes(data.len());
         Ok(ResponseData {
+            file_path: url[server_prefix.len()..].to_string(),
             url,
             data,
             mime_type,
@@ -40,6 +43,7 @@ impl ResponseData {
     pub fn mime_type(&self) -> String {
         self.mime_type.clone()
     }
+
     pub fn base_url(&self) -> String {
         self.state.repo_url().expect("This has been pre-vetted")
     }
@@ -88,8 +92,7 @@ impl ResponseData {
     }
 
     pub fn file_path(&self) -> PathBuf {
-        let path_str = format!("{}", &self.url[self.base_url().len()..]);
-        let path = self.state.crawl_db_dest_dir().join(path_str);
+        let path = self.state.crawl_db_dest_dir().join(&self.file_path);
         path
     }
     pub fn save(&self) -> Result<()> {

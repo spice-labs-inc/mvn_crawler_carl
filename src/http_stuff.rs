@@ -39,7 +39,7 @@ pub fn should_do_links(links: &Vec<String>, state: State) -> bool {
 pub fn process_page(url: String, client: &mut Client, depth: usize, state: State) -> Result<usize> {
     let mut processed_cnt = 0;
 
-    let page: ResponseData = get_url(&url, client, state.clone())?;
+    let page: ResponseData = get_url(&state.repo_url()?, &url, client, state.clone())?;
 
     if page.mime_type().starts_with("text/html") {
         let links = page.html_to_links();
@@ -113,14 +113,14 @@ fn delay_429(state: State) {
 
 pub fn get_subbed_url(url: &str, client: &mut Client, state: State) -> Result<ResponseData> {
     let ret = match state.mirror_url() {
-        Some(sub) => {
-            let first = format!("{}{}", sub, &url[state.repo_url()?.len()..]);
-            match get_url(&first, client, state.clone()) {
+        Some(mirror) => {
+            let first = format!("{}{}", mirror, &url[state.repo_url()?.len()..]);
+            match get_url(&mirror, &first, client, state.clone()) {
                 Ok(v) => Ok(v),
-                Err(_) => get_url(url, client, state.clone()),
+                Err(_) => get_url(&state.repo_url()?, url, client, state.clone()),
             }
         }
-        None => get_url(url, client, state.clone()),
+        None => get_url(&state.repo_url()?, url, client, state.clone()),
     };
     if ret.is_ok() {
         state.inc_asset_fetch_cnt();
@@ -151,7 +151,12 @@ fn fix_url(url: &str) -> String {
     ret
 }
 
-pub fn get_url(url: &str, client: &mut Client, state: State) -> Result<ResponseData> {
+pub fn get_url(
+    server_prefix: &str,
+    url: &str,
+    client: &mut Client,
+    state: State,
+) -> Result<ResponseData> {
     delay_429(state.clone());
 
     let url = fix_url(url);
@@ -180,7 +185,7 @@ pub fn get_url(url: &str, client: &mut Client, state: State) -> Result<ResponseD
         let cnt_429 = state.inc_429_cnt();
         info!("429 count {} url {}", cnt_429, url);
         sleep(Duration::from_millis(350));
-        let ret = get_url(&url, client, state.clone());
+        let ret = get_url(server_prefix, &url, client, state.clone());
         state.dec_429_cnt();
         return ret;
     }
@@ -199,10 +204,18 @@ pub fn get_url(url: &str, client: &mut Client, state: State) -> Result<ResponseD
     };
     let bytes = info.bytes()?;
     let v: Vec<u8> = bytes.into();
-    ResponseData::new(url.to_string(), v, content_type.to_string(), state.clone())
+    ResponseData::new(
+        url.to_string(),
+        server_prefix,
+        v,
+        content_type.to_string(),
+        state.clone(),
+    )
 }
 
 pub fn spawn_a_page(state: State) {
+    // increment the running thread before we return from this method
+    // to avoid a race condition for shutting down the program
     let x = state.inc_running_threads();
     thread::spawn(move || {
         let mut client = build_client();

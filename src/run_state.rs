@@ -14,6 +14,9 @@ use chrono::prelude::*;
 
 use crate::args::Args;
 
+/// The state of the running job
+/// An `Arc` of this gets passed everywhere
+/// so there's no global shared state
 #[derive(Debug)]
 pub struct RunState {
     args: Args,
