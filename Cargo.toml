@@ -1,0 +1,28 @@
+[package]
+name = "mvn_crawl"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "mvn_crawl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mvn_crawl"
+path = "src/main.rs"
+
+
+
+[dependencies]
+reqwest = {version = "0.12", features = ["blocking", "json", "stream", "native-tls-vendored", "http2"]}
+# tokio = {version = "1.44", features = ["full"]}
+scraper = {version = "0.23"}
+xmltree = {version = "0.11"}
+anyhow = {version = "1"}
+env_logger = {version = "0.11"}
+log = {version="0.4", features=[]}
+clap = {version="4.5", features=["derive"]}
+thousands = {version = "0.2"}
+chrono = {version = "0.4", features = ["serde"]}
+walkdir = {version = "2.5"}
+flume = {version = "0.11"}
