@@ -1,4 +1,4 @@
-# Maven Crawl
+# [Maven Crawler Carl](https://en.wikipedia.org/wiki/Dungeon_Crawler_Carl)
 
 Crawls maven repsitories, first by building an index of the packages
 in a particular repository, then, in a separate command, the
@@ -7,7 +7,7 @@ materialized into all the package version artifacts.
 
 ## Data stores
 
-There are two data stores in Maven Crawl:
+There are two data stores in Maven Crawler Carl:
 
 * Crawl DB -- the versioned (by date) crawl of a maven repository.
   The crawl db should be stored in a separate directory hierarchy
@@ -63,7 +63,7 @@ of those packages with the versions (as defined by the contents of the
 ## Reifying
 
 To turn a crawl into the artifacts represented by a crawl, reify the crawl
-into the artifact DB
+into the artifact DB:
 
 `mvn_crawl --crawl-db ~/data/maven/crawl_db/central --repo https://repo1.maven.org/maven2/ --mirror https://maven-central-eu.storage-download.googleapis.com/maven2/ --artifact-db data/maven/artifact_db/central --reify-artifact-db`
 

@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use env_logger::Env;
 use log::info;
-use mvn_crawl::{
+use mvn_crawler_carl::{
     args::Args,
     http_stuff::{periodic_info, spawn_a_page},
     plan_merge::{do_merge, plan_merge_to_console},
