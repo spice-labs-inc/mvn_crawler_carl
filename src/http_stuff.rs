@@ -247,6 +247,7 @@ pub fn spawn_a_page(state: State) {
 pub fn periodic_info(state: State) {
     thread::spawn(move || {
         while state.thread_cnt() > 0 {
+            sleep(Duration::from_secs(30));
             info!(
                 "At {:?} threads {} urls {} assets {} queue size {} loaded {}gb",
                 state.run_duration(),
@@ -256,7 +257,6 @@ pub fn periodic_info(state: State) {
                 state.queue_len().separate_with_commas(),
                 (state.get_total_bytes() / (1024 * 1024 * 1024)).separate_with_commas()
             );
-            sleep(Duration::from_secs(30));
         }
     });
 }

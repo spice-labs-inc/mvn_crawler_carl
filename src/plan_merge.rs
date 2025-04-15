@@ -11,6 +11,7 @@ use anyhow::{Result, bail};
 
 use flume::{Receiver, Sender};
 use log::{error, info};
+use rand::{rng, seq::SliceRandom};
 use walkdir::WalkDir;
 use xmltree::Element as XmlElement;
 
@@ -229,6 +230,11 @@ pub fn plan_merge(dest: Sender<MergeCmd>, state: State) -> Result<()> {
             meta_data_in_crawl.push(entry.path().to_path_buf());
         }
     }
+
+    // randomize the list so for partial reification, the
+    // order changes in each run which will give a better idea
+    // of the amount of time left
+    meta_data_in_crawl.shuffle(&mut rng());
     info!(
         "In {:?} found {} entries",
         crawl_db,
